@@ -36,15 +36,16 @@ flowchart TD
           CWE["EventBridge<br/>(error metric)"]
         end
         SNS["SNS Topic<br/>(alerting)"]
-        E["Email"]
     end
 
     subgraph SPOTIFY["Spotify"]
         API
     end
 
+    E["Email"]
+
     EB -->|Invoke every 15m| L
-    L <-->|Get Spotify app credentails, get & refresh token| SM
+    L <-->|Get Spotify app credentials, get & refresh token| SM
     L <-->|Get tracks, update playlists| API
     L -->|Logs| CWL
     L -->|Errors| CWE -->|Writes| SNS --> |Sends| E
@@ -87,7 +88,7 @@ AWS CLI equivalent:
 ```bash
 aws secretsmanager create-secret \
   --name spotipy-oauth \
-  --secret-string '{"client_id": "<client id>", "client_secret": <client secret>"}'
+  --secret-string '{"client_id": "<client id>", "client_secret": "<client secret>"}'
 ```
 
 2. Note the secret ARN.
@@ -181,10 +182,10 @@ zip -r spotify_recently_added.zip -j app/*
     - Runtime: `python3.13`.
     - Layers: `spotipy_boto3` layer created earlier and [Powertools for AWS Lambda (Python)](https://docs.powertools.aws.dev/lambda/python/latest/#lambda-layer_1).
     - Timeout: 15 minutes.
-    - Execution Role: suse the IAM role created earlier.
+    - Execution Role: use the IAM role created earlier.
     - Environment variables: see [environment variables](#environment-variables).
     - Reserved concurrency: 1 (prevents overlapping executions).
-    - etry attempts: 0, maximum event age: 60s (avoids old retries)
+    - Retry attempts: 0, maximum event age: 60s (avoids old retries)
 
 3. Test the Lambda with any test event to confirm it works.
 
@@ -288,7 +289,7 @@ aws cloudwatch put-metric-alarm \
 | ----------------- | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
 | `PLAYLIST_NAMES`  | `["Recently Added", "Older Recently Added", "Even Older Recently Added"]` | Names of playlists to create or sync (JSON array). Must match the number of chunks.     |
 | `PLAYLIST_LENGTH` | `200`                                                                     | Number of tracks in each playlist (Spotify max per playlist is 10,000).                 |
-| `OAUTH_SECRET`    | `spotipy-oauth`                                                           | Secrets Manager secret storing Spotify `SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET`. |
+| `OAUTH_SECRET`    | `spotipy-oauth`                                                           | Secrets Manager secret storing Spotify `client_id` and `client_secret`. |
 | `TOKEN_SECRET`    | `spotipy-token`                                                           | Secrets Manager secret used by Spotipy to cache OAuth tokens.                           |
 | `AWS_REGION`      | `us-east-2`                                                               | AWS region for Lambda, Secrets Manager, etc.                                            |
 | `REDIRECT_URI`    | `http://127.0.0.1:8000/callback`                                          | Redirect URI for Spotify OAuth. Must match the value set in your Spotify app.           |
