@@ -17,13 +17,38 @@ This creates a rolling set of playlists that automatically refresh as you add ne
 The implementation uses:
 
 - **AWS Lambda** for execution.
-- **AWS Secrets Manager** to store Spotify credentials and cached tokens.
+- **AWS Secrets Manager** to store Spotify app credentials and cached tokens.
 - **AWS EventBridge (CloudWatch Events)** for scheduling.
 - **[Spotipy](https://spotipy.readthedocs.io/en/)** (Python client for the Spotify Web API) for playlist management.
 - **AWS Lambda Powertools** for structured logging.
-- **AWS SNS** and **AWS CloudWatch alarm** for alerting on failures.
+- **AWS CloudWatch alarm** and **AWS SNS** for alerting on failures.
 
 It’s lightweight, serverless, and (once deployed) completely hands-off.
+
+```mermaid
+flowchart TD
+    subgraph AWS["AWS"]
+        EB["EventBridge<br/>(schedule trigger)"]
+        L["Lambda Function<br/>(spotify_recently_added)"]
+        SM["Secrets Manager<br/>(credentials + token)"]
+        subgraph CloudWatch
+          CWL["Logs<br/>(monitoring)"]
+          CWE["EventBridge<br/>(error metric)"]
+        end
+        SNS["SNS Topic<br/>(alerting)"]
+        E["Email"]
+    end
+
+    subgraph SPOTIFY["Spotify"]
+        API
+    end
+
+    EB -->|Invoke every 15m| L
+    L <-->|Get Spotify app credentails, get & refresh token| SM
+    L <-->|Get tracks, update playlists| API
+    L -->|Logs| CWL
+    L -->|Errors| CWE -->|Writes| SNS --> |Sends| E
+```
 
 ---
 
