@@ -12,6 +12,7 @@ GET_LIMIT = 50
 
 class PlaylistSyncError(Exception):
     """Custom exception for playlist synchronization errors."""
+
     pass
 
 
@@ -26,76 +27,24 @@ class RecentlyAddedPlaylistSyncer:
         self,
         sp: spotipy.Spotify,
         playlist_name: str,
+        playlist_id: str,
         playlist_index: int,
         playlist_length: int = 200,
     ):
         # Spotify client
         self.sp = sp
 
-        # Target playlist name
+        # Playlist name
         self.playlist_name = playlist_name
+
+        # Playlist id
+        self.playlist_id = playlist_id
 
         # Which recently-added chunk to use (based on ordering)
         self.playlist_index = playlist_index
 
         # How long the playlist should be
         self.playlist_length = playlist_length
-
-    def get_or_create_playlist(self) -> str:
-        """Get the playlist ID by name, or create playlist if it doesn't exist."""
-
-        # Initialize playlist list & offset for pagination
-        offset = 0
-
-        # Loop until playlist found or out of playlists
-        while True:
-
-            # Get current user's playlists with offset
-            playlists = self.sp.current_user_playlists(limit=GET_LIMIT, offset=offset)
-
-            # If playlists missing, log error and raise exception
-            if playlists is None:
-                raise PlaylistSyncError("Failed to retrieve user playlists")
-
-            # Get playlists
-            playlists = playlists.get("items", [])
-
-            # If no more playlists, break loop
-            if not playlists:
-                break
-
-            # Loop through playlists
-            for playlist in playlists:
-
-                # If playlist name found, return the ID
-                if playlist["name"] == self.playlist_name:
-                    logger.info(f"Found existing playlist: {playlist['id']}")
-                    return playlist["id"]
-
-            # Increment offset
-            offset += GET_LIMIT
-
-        # If playlist not found
-
-        # Get current user's information
-        user = self.sp.current_user()
-
-        # If user missing, log error and raise exception
-        if user is None:
-            raise PlaylistSyncError("Failed to retrieve user information")
-
-        # Create a new playlist
-        playlist = self.sp.user_playlist_create(
-            user["id"], self.playlist_name, public=False
-        )
-
-        # If playlist missing, log error and raise exception
-        if playlist is None:
-            raise PlaylistSyncError(f"Failed to create playlist {self.playlist_name}")
-
-        # Log and return the new playlist ID
-        logger.info(f"Created new playlist: {playlist['id']}")
-        return playlist["id"]
 
     def get_recently_added_tracks(self) -> List[str]:
         """Get recently added tracks from user's library with offset."""
@@ -185,7 +134,7 @@ class RecentlyAddedPlaylistSyncer:
         for i in range(0, len(tracks_to_remove), GET_LIMIT):
 
             # Get current batch of tracks to remove
-            batch = tracks_to_remove[i:(i + GET_LIMIT)]
+            batch = tracks_to_remove[i : (i + GET_LIMIT)]
 
             # Remove all occurrences of the batch from the playlist
             self.sp.playlist_remove_all_occurrences_of_items(self.playlist_id, batch)
@@ -200,7 +149,7 @@ class RecentlyAddedPlaylistSyncer:
         for i in reversed(range(0, len(tracks_to_add), GET_LIMIT)):
 
             # Get current batch of tracks to add
-            batch = tracks_to_add[i:(i + GET_LIMIT)]
+            batch = tracks_to_add[i : (i + GET_LIMIT)]
 
             # Add the batch to the beginning of the playlist
             self.sp.playlist_add_items(self.playlist_id, batch, position=0)
@@ -253,10 +202,7 @@ class RecentlyAddedPlaylistSyncer:
         # Log sync start
         logger.info(f"Syncing recently added playlist: {self.playlist_name}")
 
-        # Get or create playlist
-        self.playlist_id = self.get_or_create_playlist()
-
-        # Fetch playlist name
+        # Get recently added tracks
         recently_added_tracks = self.get_recently_added_tracks()
 
         # Get playlist tracks

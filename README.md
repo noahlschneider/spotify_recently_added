@@ -45,7 +45,7 @@ flowchart TD
     E["Email"]
 
     EB -->|Invoke every 15m| L
-    L <-->|Get Spotify app credentials, get & refresh token| SM
+    L <-->|Get Spotify app credentials, get & refresh token, get playlist names & IDs| SM
     L <-->|Get tracks, update playlists| API
     L -->|Logs| CWL
     L -->|Errors| CWE -->|Writes| SNS --> |Sends| E
@@ -289,7 +289,8 @@ aws cloudwatch put-metric-alarm \
 | ----------------- | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
 | `PLAYLIST_NAMES`  | `["Recently Added", "Older Recently Added", "Even Older Recently Added"]` | Names of playlists to create or sync (JSON array). Must match the number of chunks.     |
 | `PLAYLIST_LENGTH` | `200`                                                                     | Number of tracks in each playlist (Spotify max per playlist is 10,000).                 |
-| `OAUTH_SECRET`    | `spotipy-oauth`                                                           | Secrets Manager secret storing Spotify `client_id` and `client_secret`. |
+| `OAUTH_SECRET`    | `spotipy-oauth`                                                           | Secrets Manager secret storing Spotify `client_id` and `client_secret`.                 |
 | `TOKEN_SECRET`    | `spotipy-token`                                                           | Secrets Manager secret used by Spotipy to cache OAuth tokens.                           |
+| `PLAYLIST_SECRET` | `spotipy-playlists`                                                       | Secrets Manager secret storing Spotify recently added playlist names and IDs.           |
 | `AWS_REGION`      | `us-east-2`                                                               | AWS region for Lambda, Secrets Manager, etc.                                            |
 | `REDIRECT_URI`    | `http://127.0.0.1:8000/callback`                                          | Redirect URI for Spotify OAuth. Must match the value set in your Spotify app.           |
