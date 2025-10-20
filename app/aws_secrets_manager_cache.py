@@ -32,7 +32,7 @@ class AwsSecretManagerCacheHandler(CacheHandler):
         # Try to get and convert secret JSON string
         try:
             get_secret_value_response = (
-                    self.secret_manager_client.get_secret_value(
+                self.secret_manager_client.get_secret_value(
                     SecretId=self.secret_name
                 )
             )
