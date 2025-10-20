@@ -1,7 +1,6 @@
 import json
 from typing import Any, Dict, Optional
 
-import boto3
 from aws_lambda_powertools import Logger
 from botocore.client import BaseClient
 from botocore.exceptions import ClientError
@@ -15,23 +14,14 @@ class AwsSecretManagerCacheHandler(CacheHandler):
     A cache handler that stores the Spotipy token info in AWS Secrets Manager.
     """
 
-    def __init__(
-        self,
-        secret_name: str,
-        region_name: str = "us-east-1",
-        secret_manager_client: Optional[BaseClient] = None,
-    ) -> None:
+    def __init__(self, secret_name: str, secret_manager_client: BaseClient) -> None:
         """
         Parameters:
             * secret_name: The name of the secret in AWS Secrets Manager.
-            * region_name: AWS region name (used only if a secret_manager_client
-              is not provided).
-            * secret_manager_client: An optional boto3 Secrets Manager client instance.
+            * secret_manager_client: boto3 Secrets Manager client instance.
         """
         self.secret_name: str = secret_name
-        self.secret_manager_client: BaseClient = secret_manager_client or boto3.client(
-            "secretsmanager", region_name=region_name
-        )
+        self.secret_manager_client: BaseClient = secret_manager_client
 
     def get_cached_token(self) -> Optional[Dict[str, Any]]:
         """
@@ -41,8 +31,10 @@ class AwsSecretManagerCacheHandler(CacheHandler):
 
         # Try to get and convert secret JSON string
         try:
-            get_secret_value_response = self.secret_manager_client.get_secret_value(
-                SecretId=self.secret_name
+            get_secret_value_response = (
+                    self.secret_manager_client.get_secret_value(
+                    SecretId=self.secret_name
+                )
             )
             secret_string = get_secret_value_response.get("SecretString")
             if secret_string:
@@ -50,20 +42,15 @@ class AwsSecretManagerCacheHandler(CacheHandler):
             else:
                 raise Exception(f"Secret {self.secret_name} is empty")
 
-        # If error
+        # Log and raise errors
+        except self.secret_manager_client.exceptions.ResourceNotFoundException as e:
+            logger.error(f"Secret not found: {self.secret_name}")
+            raise e
+
         except ClientError as e:
+            logger.error(f"Error retrieving secret: {e}")
+            raise e
 
-            # Log if secret not found
-            if e.response["Error"]["Code"] == "ResourceNotFoundException":
-                logger.error(f"Secret not found: {self.secret_name}")
-                raise e
-
-            # Log if other error
-            else:
-                logger.error(f"Error retrieving secret: {e}")
-                raise e
-
-        # Log if JSON decode error
         except json.JSONDecodeError as e:
             logger.error(f"Couldn't decode JSON from secret: {self.secret_name}")
             raise e
@@ -80,24 +67,22 @@ class AwsSecretManagerCacheHandler(CacheHandler):
                 SecretId=self.secret_name, SecretString=json.dumps(token_info)
             )
 
-        # If error
-        except ClientError as e:
+        # If secret doesn't exist
+        except self.secret_manager_client.exceptions.ResourceNotFoundException:
 
-            # Check if the secret doesn't exist
-            if e.response["Error"]["Code"] == "ResourceNotFoundException":
+            # Try to create the secret
+            try:
+                self.secret_manager_client.create_secret(
+                    Name=self.secret_name,
+                    SecretString=json.dumps(token_info),
+                )
 
-                # If it doesn't, create the secret
-                try:
-                    self.secret_manager_client.create_secret(
-                        Name=self.secret_name, SecretString=json.dumps(token_info)
-                    )
-
-                # If error when creating the secret, log and raise
-                except ClientError as e:
-                    logger.error(f"Error creating secret: {e}")
-                    raise e
-
-            # If other error when updating secret, log and raise
-            else:
-                logger.warning(f"Error updating secret: {e}")
+            # Log and raise errors
+            except ClientError as e:
+                logger.error(f"Error creating secret: {e}")
                 raise e
+
+        # Log and raise errors
+        except ClientError as e:
+            logger.warning(f"Error updating secret: {e}")
+            raise e
