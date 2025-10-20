@@ -21,8 +21,7 @@ class AwsParameterStoreCacheHandler(CacheHandler):
     ) -> None:
         """
         Parameters:
-            * parameter_name: The name of the parameter in AWS Systems Manager
-              Parameter Store.
+            * parameter_name: The name of the parameter in AWS Parameter Store.
             * parameter_store_client: boto3 SSM client instance.
         """
         self.parameter_name: str = parameter_name

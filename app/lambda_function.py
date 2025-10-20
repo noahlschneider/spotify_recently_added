@@ -26,7 +26,7 @@ playlist_names = json.loads(
 )
 playlist_length = int(os.getenv("PLAYLIST_LENGTH", "200"))
 
-# AWS Systems Manager Parameter Store parameters (for parameter store backend)
+# AWS Parameter Store parameters (for parameter store backend)
 playlist_parameter = os.getenv("PLAYLIST_PARAMETER", "/spotify/playlists")
 oauth_parameter = os.getenv("OAUTH_PARAMETER", "/spotify/oauth")
 token_parameter = os.getenv("TOKEN_PARAMETER", "/spotify/token")
@@ -65,7 +65,7 @@ def create_spotipy_client(secrets_client: BaseClient) -> spotipy.Spotify:
     global cached_oauth_data
     if cached_oauth_data is None:
         if secrets_backend == "parameterstore":
-            logger.info("Fetching OAuth from AWS Systems Manager Parameter Store")
+            logger.info("Fetching OAuth from AWS Parameter Store")
             cached_oauth_data = json.loads(
                 secrets_client.get_parameter(Name=oauth_parameter, WithDecryption=True)[
                     "Parameter"

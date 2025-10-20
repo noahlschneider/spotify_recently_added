@@ -17,7 +17,7 @@ This creates a rolling set of playlists that automatically refresh as you add ne
 The implementation uses:
 
 - **AWS Lambda** for execution.
-- **AWS Systems Manager Parameter Store** (default) or **AWS Secrets Manager** to store Spotify app credentials and cached tokens.
+- **AWS Parameter Store** (default) or **AWS Secrets Manager** to store Spotify app credentials and cached tokens.
 - **AWS EventBridge (CloudWatch Events)** for scheduling.
 - **[Spotipy](https://spotipy.readthedocs.io/en/)** (Python client for the Spotify Web API) for playlist management.
 - **AWS Lambda Powertools** for structured logging.
@@ -59,7 +59,7 @@ flowchart TD
 
 Make sure you have:
 
-- An **AWS account** with permissions for Lambda, EventBridge, and Systems Manager Parameter Store or Secret Manager.
+- An **AWS account** with permissions for Lambda, EventBridge, and Parameter Store or Secret Manager.
 - A **Spotify Developer account** to create an app and get your credentials.
 - **Python 3.13+** installed, with a virtual environment if desired.
 - **AWS CLI** installed and configured.
@@ -72,11 +72,9 @@ Make sure you have:
 
 ## Secrets Backend Setup
 
-You can choose between **AWS Systems Manager Parameter Store** (default, in AWS free tier) or **AWS Secrets Manager** (not in AWS free tier).
+You can choose between **AWS Parameter Store** (option A, default, in AWS free tier) or **AWS Secrets Manager** (option B, not in AWS free tier).
 
-### Option A: AWS Systems Manager Parameter Store (Recommended)
-
-1. Create a new parameter (default name: `/spotify/oauth`) with the following JSON structure:
+1. Create a new Parameter Store parameter (option A, default name: `/spotify/oauth`) or Secret Manager secrete (option B, default name `spotify-oauth`) with the following JSON structure:
 
 ```json
 {
@@ -88,32 +86,17 @@ You can choose between **AWS Systems Manager Parameter Store** (default, in AWS 
 AWS CLI equivalent:
 
 ```bash
+# Option A: Parameter Store (Default)
 aws ssm put-parameter \
   --name /spotify/oauth \
   --value '{"client_id": "<client id>", "client_secret": "<client secret>"}' \
   --type SecureString
-```
 
-### Option B: AWS Secrets Manager
-
-1. Create a new secret (default name: `spotify-oauth`) with the following JSON structure:
-
-```json
-{
-  "client_id": "<client id>",
-  "client_secret": "<client secret>"
-}
-```
-
-AWS CLI equivalent:
-
-```bash
+# Option B: Secret Manager
 aws secretsmanager create-secret \
   --name spotify-oauth \
   --secret-string '{"client_id": "<client id>", "client_secret": "<client secret>"}'
 ```
-
-2. Ensure you set environment variable `SECRETS_BACKEND` to `secretsmanager`.
 
 ## Run Script Locally (First-Time Auth)
 
@@ -174,7 +157,7 @@ Permissions needed depend on which secrets backend you choose.
 
     - Trusted entity type: AWS Service.
     - Use case: `Lambda`.
-    - Permissions:  `AWSLambdaBasicExecutionRole` and `AmazonSSMReadOnlyAccess` (if using option A: SSM Parameter Store, default) or SecretsManagerReadWrite` (if using option B: Secret Manager).
+    - Permissions:  `AWSLambdaBasicExecutionRole` and `AmazonSSMFullAccess` (if using option A: Parameter Store, default) or SecretsManagerReadWrite` (if using option B: Secret Manager).
 
 2. Note the role ARN — you’ll need it when creating the Lambda function.
 
@@ -185,25 +168,19 @@ aws iam create-role \
   --role-name spotify_recently_added_role \
   --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
 
-# Option A: For SSM Parameter Store (Default)
-aws iam attach-role-policy \
-  --role-name spotify_recently_added_role \
-  --policy-arn arn:aws:iam::aws:policy/AmazonSSMReadOnlyAccess
-
-# Option B: For Secret Manager
-aws iam attach-role-policy \
-  --role-name spotify_recently_added_role \
-  --policy-arn arn:aws:iam::aws:policy/SecretsManagerReadWrite
-
 aws iam attach-role-policy \
   --role-name spotify_recently_added_role \
   --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 
-# TODO: Remove?
-# aws iam put-role-policy \
-#   --role-name spotify_recently_added_role \
-#   --policy-name SSMParameterWriteAccess \
-#   --policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"ssm:PutParameter","Resource":"arn:aws:ssm:*:*:parameter/spotify/*"}]}'
+# Option A: Parameter Store (Default)
+aws iam attach-role-policy \
+  --role-name spotify_recently_added_role \
+  --policy-arn arn:aws:iam::aws:policy/AmazonSSMFullAccess
+
+# Option B: Secret Manager
+aws iam attach-role-policy \
+  --role-name spotify_recently_added_role \
+  --policy-arn arn:aws:iam::aws:policy/SecretsManagerReadWrite
 ```
 
 ## Create Lambda Function
