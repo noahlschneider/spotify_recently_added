@@ -13,8 +13,6 @@ GET_LIMIT = 50
 class PlaylistSyncError(Exception):
     """Custom exception for playlist synchronization errors."""
 
-    pass
-
 
 class TrackFetchError(Exception):
     """Custom exception for when tracks cannot be retrieved from Spotify."""
