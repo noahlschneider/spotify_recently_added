@@ -2,20 +2,21 @@ import json
 import os
 from typing import Any, Dict, List
 
-import boto3
 import spotipy
 from aws_lambda_powertools import Logger
-from aws_secrets_manager_cache import AwsSecretManagerCacheHandler
-from aws_parameter_store_cache_handler import AwsParameterStoreCacheHandler
-from botocore.client import BaseClient
-from botocore.exceptions import ClientError
 from recently_added_playlist_syncer import RecentlyAddedPlaylistSyncer
+from secrets_backend import ResourceNotFoundException, SecretsBackend
 from spotipy.oauth2 import SpotifyOAuth
 
 # CONFIGURATION VARIABLES (can be overridden by environment variables)
 
-# Secrets backend selection ("parameterstore" or "secretsmanager")
-secrets_backend = os.getenv("SECRETS_BACKEND", "parameterstore")
+# Secrets backend selection ("PS" or "SM")
+secrets_backend = os.getenv("SECRETS_BACKEND", "PS")
+
+# Secrets/parameter names
+oauth_config_name = os.getenv("OAUTH_NAME", "/spotify/oauth")
+token_config_name = os.getenv("TOKEN_NAME", "/spotify/token")
+playlist_config_name = os.getenv("PLAYLIST_NAME", "/spotify/playlists")
 
 # Playlist names and lengths
 playlist_names = json.loads(
@@ -26,16 +27,6 @@ playlist_names = json.loads(
 )
 playlist_length = int(os.getenv("PLAYLIST_LENGTH", "200"))
 
-# AWS Parameter Store parameters (for parameter store backend)
-playlist_parameter = os.getenv("PLAYLIST_PARAMETER", "/spotify/playlists")
-oauth_parameter = os.getenv("OAUTH_PARAMETER", "/spotify/oauth")
-token_parameter = os.getenv("TOKEN_PARAMETER", "/spotify/token")
-
-# AWS Secrets Manager secret parameters (for secrets manager backend)
-playlist_secret = os.getenv("PLAYLIST_SECRET", "spotify-playlists")
-oauth_secret = os.getenv("OAUTH_SECRET", "spotify-oauth")
-token_secret = os.getenv("TOKEN_SECRET", "spotify-token")
-
 # AWS region name
 region_name = os.getenv("AWS_REGION", "us-east-2")
 
@@ -43,8 +34,8 @@ region_name = os.getenv("AWS_REGION", "us-east-2")
 scope = "user-library-read playlist-modify-private"
 redirect_uri = os.getenv("REDIRECT_URI", "http://127.0.0.1:8000/callback")
 
-# Initialize global secrets client, Spotipy client, cached OAuth data
-secrets_client = None
+# Initialize global secrets backend, Spotipy client, cached OAuth data
+secrets_backend_client = None
 spotipy_client = None
 cached_oauth_data = None
 
@@ -56,7 +47,7 @@ class PlaylistsDataError(Exception):
     """Custom exception for playlists data errors."""
 
 
-def create_spotipy_client(secrets_client: BaseClient) -> spotipy.Spotify:
+def create_spotipy_client(backend: SecretsBackend) -> spotipy.Spotify:
     """
     Authenticate and create Spotify client
     """
@@ -64,30 +55,11 @@ def create_spotipy_client(secrets_client: BaseClient) -> spotipy.Spotify:
     # If cached OAuth data is not set, fetch it from secrets backend
     global cached_oauth_data
     if cached_oauth_data is None:
-        if secrets_backend == "parameterstore":
-            logger.info("Fetching OAuth from AWS Parameter Store")
-            cached_oauth_data = json.loads(
-                secrets_client.get_parameter(Name=oauth_parameter, WithDecryption=True)[
-                    "Parameter"
-                ]["Value"]
-            )
-        else:
-            logger.info("Fetching OAuth from AWS Secrets Manager")
-            cached_oauth_data = json.loads(
-                secrets_client.get_secret_value(SecretId=oauth_secret)["SecretString"]
-            )
+        logger.info(f"Fetching OAuth credentials from {backend.backend_type}")
+        cached_oauth_data = backend.get(backend.oauth_name)
 
-    # Create cache handler based on backend
-    if secrets_backend == "parameterstore":
-        cache_handler = AwsParameterStoreCacheHandler(
-            token_parameter,
-            parameter_store_client=secrets_client,
-        )
-    else:
-        cache_handler = AwsSecretManagerCacheHandler(
-            token_secret,
-            secret_manager_client=secrets_client,
-        )
+    # Create cache handler for token storage
+    cache_handler = backend.create_cache_handler()
 
     # Create Spotipy OAuth manager using cache handler
     auth_manager = SpotifyOAuth(
@@ -105,9 +77,7 @@ def create_spotipy_client(secrets_client: BaseClient) -> spotipy.Spotify:
 
 
 def get_playlist_ids(
-    playlist_names: List[str],
-    secrets_client: BaseClient,
-    sp: spotipy.Spotify,
+    playlist_names: List[str], backend: SecretsBackend, sp: spotipy.Spotify
 ) -> List[tuple]:
     """Get the playlist IDs by name, or create playlist if it doesn't exist."""
 
@@ -115,60 +85,35 @@ def get_playlist_ids(
     playlists = []
 
     try:
-
         # Get data from backend
-        if secrets_backend == "parameterstore":
-            raw = secrets_client.get_parameter(
-                Name=playlist_parameter, WithDecryption=True
-            )["Parameter"]["Value"]
-        else:
-            raw = secrets_client.get_secret_value(SecretId=playlist_secret)[
-                "SecretString"
-            ]
+        data = backend.get(backend.playlist_name)
+        playlists = [(p[0], p[1]) for p in data]
 
-        # Convert to playlist tuples
-        playlists = [(p[0], p[1]) for p in json.loads(raw)]
+    # If resource doesn't exist, create playlists
+    except ResourceNotFoundException:
 
-    # If error
-    except ClientError as e:
+        # Get current user's information
+        user = sp.current_user()
 
-        # Check if resource doesn't exist
-        error_code = e.response["Error"]["Code"]
-        if error_code in ["ParameterNotFound", "ResourceNotFoundException"]:
+        # Check if user is none and raise exception
+        if user is None or "id" not in user:
+            raise PlaylistsDataError("Failed to fetch current user")
 
-            # Get current user's information
-            user = sp.current_user()
+        # Loop over playlist names
+        for name in playlist_names:
 
-            # Check if user is none and raise exception
-            if user is None or "id" not in user:
-                raise PlaylistsDataError("Failed to fetch current user")
+            # Create the user playlist
+            playlist_response = sp.user_playlist_create(user["id"], name, public=False)
 
-            # Loop over playlist names
-            for playlist_name in playlist_names:
+            # Check if playlists returned none and raise exception
+            if playlist_response is None or "id" not in playlist_response:
+                raise Exception(f"Failed to create playlist '{name}'")
 
-                # Create the user playlist
-                playlist_response = sp.user_playlist_create(
-                    user["id"], playlist_name, public=False
-                )
+            # Append the playlist name and ID
+            playlists.append((name, playlist_response["id"]))
 
-                # Check if playlists returned none and raise exception
-                if playlist_response is None or "id" not in playlist_response:
-                    raise Exception(f"Failed to create playlist '{playlist_name}'")
-
-                # Append the playlist name and ID
-                playlists.append((playlist_name, playlist_response["id"]))
-
-            # Save playlists to backend
-            if secrets_backend == "parameterstore":
-                secrets_client.put_parameter(
-                    Name=playlist_parameter,
-                    Value=json.dumps(playlists),
-                    Type="SecureString",
-                )
-            else:
-                secrets_client.create_secret(
-                    Name=playlist_secret, SecretString=json.dumps(playlists)
-                )
+        # Save playlists to backend
+        backend.put(backend.playlist_name, playlists)
 
     # Check if playlists is empty and raise error
     if playlists == []:
@@ -190,22 +135,23 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     AWS Lambda function to create or update Spotify recently added playlists
     """
 
-    # If secrets client not initialized, create it based on backend
-    global secrets_client
-    if secrets_client is None:
-        if secrets_backend == "parameterstore":
-            secrets_client = boto3.client("ssm", region_name=region_name)
-            logger.info("Using AWS Parameter Store backend")
-        else:
-            secrets_client = boto3.client("secretsmanager", region_name=region_name)
-            logger.info("Using AWS Secrets Manager backend")
+    # If secrets backend not initialized, create it
+    global secrets_backend_client
+    if secrets_backend_client is None:
+        secrets_backend_client = SecretsBackend(
+            secrets_backend,
+            region_name,
+            oauth_config_name,
+            token_config_name,
+            playlist_config_name,
+        )
 
     # If Spotipy client not initialized, create it
     global spotipy_client
     if spotipy_client is None:
-        spotipy_client = create_spotipy_client(secrets_client)
+        spotipy_client = create_spotipy_client(secrets_backend_client)
 
-    playlists = get_playlist_ids(playlist_names, secrets_client, spotipy_client)
+    playlists = get_playlist_ids(playlist_names, secrets_backend_client, spotipy_client)
 
     # For each recently added playlist
     for i, (playlist_name, playlist_id) in enumerate(playlists):

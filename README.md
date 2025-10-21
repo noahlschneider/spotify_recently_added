@@ -72,9 +72,9 @@ Make sure you have:
 
 ## Secrets Backend Setup
 
-You can choose between **AWS Parameter Store** (option A, default, in AWS free tier) or **AWS Secrets Manager** (option B, not in AWS free tier).
+You can choose between **AWS Parameter Store** (default, in AWS free tier) or **AWS Secrets Manager** (not in AWS free tier). Both use the same naming format.
 
-1. Create a new Parameter Store parameter (option A, default name: `/spotify/oauth`) or Secret Manager secrete (option B, default name `spotify-oauth`) with the following JSON structure:
+1. Create a new Parameter Store parameter or Secrets Manager secret (default name: `/spotify/oauth`) with the following JSON structure:
 
 ```json
 {
@@ -86,15 +86,15 @@ You can choose between **AWS Parameter Store** (option A, default, in AWS free t
 AWS CLI equivalent:
 
 ```bash
-# Option A: Parameter Store (Default)
+# Parameter Store (Default)
 aws ssm put-parameter \
   --name /spotify/oauth \
   --value '{"client_id": "<client id>", "client_secret": "<client secret>"}' \
   --type SecureString
 
-# Option B: Secret Manager
+# Secrets Manager
 aws secretsmanager create-secret \
-  --name spotify-oauth \
+  --name /spotify/oauth \
   --secret-string '{"client_id": "<client id>", "client_secret": "<client secret>"}'
 ```
 
@@ -157,7 +157,7 @@ Permissions needed depend on which secrets backend you choose.
 
     - Trusted entity type: AWS Service.
     - Use case: `Lambda`.
-    - Permissions:  `AWSLambdaBasicExecutionRole` and `AmazonSSMFullAccess` (if using option A: Parameter Store, default) or SecretsManagerReadWrite` (if using option B: Secret Manager).
+    - Permissions:  `AWSLambdaBasicExecutionRole` and `AmazonSSMFullAccess` (if using Parameter Store, default) or `SecretsManagerReadWrite` (if using Secrets Manager).
 
 2. Note the role ARN — you’ll need it when creating the Lambda function.
 
@@ -172,12 +172,12 @@ aws iam attach-role-policy \
   --role-name spotify_recently_added_role \
   --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 
-# Option A: Parameter Store (Default)
+# Parameter Store (Default)
 aws iam attach-role-policy \
   --role-name spotify_recently_added_role \
   --policy-arn arn:aws:iam::aws:policy/AmazonSSMFullAccess
 
-# Option B: Secret Manager
+# Secrets Manager
 aws iam attach-role-policy \
   --role-name spotify_recently_added_role \
   --policy-arn arn:aws:iam::aws:policy/SecretsManagerReadWrite
@@ -298,16 +298,13 @@ aws cloudwatch put-metric-alarm \
 
 # Environment Variables
 
-| Variable              | Default Value                                                             | Description                                                                                                           |
-| --------------------- | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `SECRETS_BACKEND`     | `parameterstore`                                                          | Secrets backend to use. `parameterstore` (Option A: Parameter Store) or `secretsmanager` (Option B: Secrets Manager). |
-| `PLAYLIST_NAMES`      | `["Recently Added", "Older Recently Added", "Even Older Recently Added"]` | Names of playlists to create or sync (JSON array). Must match the number of chunks.                                   |
-| `PLAYLIST_LENGTH`     | `200`                                                                     | Number of tracks in each playlist (Spotify max per playlist is 10,000).                                               |
-| `OAUTH_PARAMETER`     | `/spotify/oauth`                                                          | Parameter Store parameter storing Spotify `client_id` and `client_secret` (SSM mode).                                 |
-| `TOKEN_PARAMETER`     | `/spotify/token`                                                          | Parameter Store parameter used by Spotipy to cache OAuth tokens (SSM mode).                                           |
-| `PLAYLIST_PARAMETER`  | `/spotify/playlists`                                                      | Parameter Store parameter storing playlist names and IDs (SSM mode).                                                  |
-| `OAUTH_SECRET`        | `spotipy-oauth`                                                           | Secrets Manager secret storing Spotify `client_id` and `client_secret` (Secrets Manager mode).                        |
-| `TOKEN_SECRET`        | `spotipy-token`                                                           | Secrets Manager secret used by Spotipy to cache OAuth tokens (Secrets Manager mode).                                  |
-| `PLAYLIST_SECRET`     | `spotipy-playlists`                                                       | Secrets Manager secret storing playlist names and IDs (Secrets Manager mode).                                         |
-| `AWS_REGION`          | `us-east-2`                                                               | AWS region for Lambda and secrets backend.                                                                            |
-| `REDIRECT_URI`        | `http://127.0.0.1:8000/callback`                                          | Redirect URI for Spotify OAuth. Must match the value set in your Spotify app.                                         |
+| Variable              | Default Value                                                             | Description                                                                                                   |
+| --------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `SECRETS_BACKEND`     | `PS`                                                                      | Secrets backend to use. `PS` (Parameter Store) or `SM` (Secrets Manager).                                     |
+| `PLAYLIST_NAMES`      | `["Recently Added", "Older Recently Added", "Even Older Recently Added"]` | Names of playlists to create or sync (JSON array). Must match the number of chunks.                           |
+| `PLAYLIST_LENGTH`     | `200`                                                                     | Number of tracks in each playlist (Spotify max per playlist is 10,000).                                       |
+| `OAUTH_NAME`          | `/spotify/oauth`                                                          | Name of parameter/secret storing Spotify `client_id` and `client_secret`.                                     |
+| `TOKEN_NAME`          | `/spotify/token`                                                          | Name of parameter/secret used by Spotipy to cache OAuth tokens.                                               |
+| `PLAYLIST_NAME`       | `/spotify/playlists`                                                      | Name of parameter/secret storing playlist names and IDs.                                                      |
+| `AWS_REGION`          | `us-east-2`                                                               | AWS region for Lambda and secrets backend.                                                                    |
+| `REDIRECT_URI`        | `http://127.0.0.1:8000/callback`                                          | Redirect URI for Spotify OAuth. Must match the value set in your Spotify app.                                 |
