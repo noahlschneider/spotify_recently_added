@@ -90,7 +90,6 @@ AWS CLI equivalent:
 aws ssm put-parameter \
   --name /spotify/oauth \
   --value '{"client_id": "<client id>", "client_secret": "<client secret>"}' \
-  --type SecureString
 
 # Secrets Manager
 aws secretsmanager create-secret \

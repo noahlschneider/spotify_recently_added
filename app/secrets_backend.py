@@ -92,7 +92,7 @@ class SecretsBackend:
             # Save to appropriate backend
             if self.backend_type == "PS":
                 self.client.put_parameter(
-                    Name=name, Value=json_value, Type="SecureString", Overwrite=True
+                    Name=name, Value=json_value, Overwrite=True
                 )
             else:
                 # Try to update existing secret
