@@ -6,6 +6,7 @@ import spotipy
 from aws_lambda_powertools import Logger
 from recently_added_playlist_syncer import RecentlyAddedPlaylistSyncer
 from secrets_backend import ResourceNotFoundException, SecretsBackend
+from spotipy.exceptions import SpotifyOauthError
 from spotipy.oauth2 import SpotifyOAuth
 
 # CONFIGURATION VARIABLES (can be overridden by environment variables)
@@ -47,6 +48,43 @@ class PlaylistsDataError(Exception):
     """Custom exception for playlists data errors."""
 
 
+def is_revoked_token_error(error: Exception) -> bool:
+    """Return True when Spotify rejected the cached refresh token."""
+
+    if not isinstance(error, SpotifyOauthError):
+        return False
+
+    message = str(error).lower()
+    return "invalid_grant" in message or "refresh token revoked" in message
+
+
+def clear_cached_spotify_token(backend: SecretsBackend | None) -> None:
+    """Remove the cached Spotify token so a fresh OAuth flow can be started."""
+
+    if backend is None:
+        return
+
+    try:
+        backend.delete(backend.token_name)
+        logger.warning("Cleared cached Spotify token after auth failure")
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.warning(f"Unable to clear cached Spotify token: {exc}")
+
+
+def raise_for_reauth(backend: SecretsBackend | None, error: Exception) -> None:
+    """Raise a user-friendly error after a revoked-token auth failure."""
+
+    if is_revoked_token_error(error):
+        clear_cached_spotify_token(backend)
+        raise RuntimeError(
+            "Spotify auth failed because the cached refresh token is invalid or "
+            "revoked. Re-authorize the app by running it locally and completing "
+            "the browser login, then rerun it."
+        ) from error
+
+    raise error
+
+
 def create_spotipy_client(backend: SecretsBackend) -> spotipy.Spotify:
     """
     Authenticate and create Spotify client
@@ -61,14 +99,30 @@ def create_spotipy_client(backend: SecretsBackend) -> spotipy.Spotify:
     # Create cache handler for token storage
     cache_handler = backend.create_cache_handler()
 
-    # Create Spotipy OAuth manager using cache handler
-    auth_manager = SpotifyOAuth(
-        client_id=cached_oauth_data["client_id"],
-        client_secret=cached_oauth_data["client_secret"],
-        redirect_uri=redirect_uri,
-        scope=scope,
-        cache_handler=cache_handler,
-    )
+    def build_auth_manager() -> SpotifyOAuth:
+        return SpotifyOAuth(
+            client_id=cached_oauth_data["client_id"],
+            client_secret=cached_oauth_data["client_secret"],
+            redirect_uri=redirect_uri,
+            scope=scope,
+            cache_handler=cache_handler,
+        )
+
+    auth_manager = build_auth_manager()
+
+    try:
+        auth_manager.get_access_token(as_dict=False)
+    except SpotifyOauthError as exc:
+        if is_revoked_token_error(exc):
+            clear_cached_spotify_token(backend)
+            logger.warning("Cached Spotify token was revoked; attempting fresh OAuth")
+            auth_manager = build_auth_manager()
+            try:
+                auth_manager.get_access_token(as_dict=False)
+            except SpotifyOauthError as reauth_exc:
+                raise_for_reauth(backend, reauth_exc)
+        else:
+            raise_for_reauth(backend, exc)
 
     # Return Spotipy client
     return spotipy.Spotify(
@@ -153,16 +207,19 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
     playlists = get_playlist_ids(playlist_names, secrets_backend_client, spotipy_client)
 
-    # For each recently added playlist
-    for i, (playlist_name, playlist_id) in enumerate(playlists):
+    try:
+        # For each recently added playlist
+        for i, (playlist_name, playlist_id) in enumerate(playlists):
 
-        # Create a recently playlist syncer instance
-        syncer = RecentlyAddedPlaylistSyncer(
-            spotipy_client, playlist_name, playlist_id, i
-        )
+            # Create a recently playlist syncer instance
+            syncer = RecentlyAddedPlaylistSyncer(
+                spotipy_client, playlist_name, playlist_id, i
+            )
 
-        # Sync the playlist
-        syncer.sync()
+            # Sync the playlist
+            syncer.sync()
+    except SpotifyOauthError as exc:
+        raise_for_reauth(secrets_backend_client, exc)
 
     # Log completion
     logger.info("SUCCESS: all recently added playlists synced successfully")

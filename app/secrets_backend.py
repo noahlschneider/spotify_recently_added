@@ -109,6 +109,25 @@ class SecretsBackend:
             logger.error(f"Error saving {name}: {e}")
             raise
 
+    def delete(self, name: str) -> None:
+        """Delete a stored secret or parameter from the backend."""
+
+        try:
+            if self.backend_type == "PS":
+                self.client.delete_parameter(Name=name)
+            else:
+                self.client.delete_secret(
+                    SecretId=name,
+                    ForceDeleteWithoutRecovery=True,
+                )
+        except ClientError as e:
+            error_code = e.response["Error"]["Code"]
+            if error_code in ["ParameterNotFound", "ResourceNotFoundException"]:
+                logger.warning(f"Resource already absent: {name}")
+                return
+            logger.error(f"Error deleting {name}: {e}")
+            raise
+
     def create_cache_handler(self) -> CacheHandler:
         """Create the appropriate cache handler for Spotipy"""
 
