@@ -38,12 +38,13 @@ class AwsSecretManagerCacheHandler(CacheHandler):
             if secret_string:
                 return json.loads(secret_string)
             else:
-                raise Exception(f"Secret {self.secret_name} is empty")
+                logger.info(f"Secret {self.secret_name} is empty")
+                return None
 
-        # Log and raise errors
-        except self.secret_manager_client.exceptions.ResourceNotFoundException as e:
-            logger.error(f"Secret not found: {self.secret_name}")
-            raise e
+        # Missing token is a normal first-run condition
+        except self.secret_manager_client.exceptions.ResourceNotFoundException:
+            logger.info(f"No cached token found in Secrets Manager: {self.secret_name}")
+            return None
 
         except ClientError as e:
             logger.error(f"Error retrieving secret: {e}")

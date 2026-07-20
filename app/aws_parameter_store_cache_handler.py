@@ -42,12 +42,13 @@ class AwsParameterStoreCacheHandler(CacheHandler):
             if parameter_value:
                 return json.loads(parameter_value)
             else:
-                raise Exception(f"Parameter {self.parameter_name} is empty")
+                logger.info(f"Parameter {self.parameter_name} is empty")
+                return None
 
-        # Log and raise errors
-        except self.parameter_store_client.exceptions.ParameterNotFound as e:
-            logger.error(f"Parameter not found: {self.parameter_name}")
-            raise e
+        # Missing token is a normal first-run condition
+        except self.parameter_store_client.exceptions.ParameterNotFound:
+            logger.info(f"No cached token found in Parameter Store: {self.parameter_name}")
+            return None
 
         except ClientError as e:
             logger.error(f"Error retrieving parameter: {e}")
@@ -68,6 +69,7 @@ class AwsParameterStoreCacheHandler(CacheHandler):
             self.parameter_store_client.put_parameter(
                 Name=self.parameter_name,
                 Value=json.dumps(token_info),
+                Type="SecureString",
                 Overwrite=True,
             )
 
