@@ -69,7 +69,7 @@ class AwsParameterStoreCacheHandler(CacheHandler):
             self.parameter_store_client.put_parameter(
                 Name=self.parameter_name,
                 Value=json.dumps(token_info),
-                Type="SecureString",
+                Type="String",
                 Overwrite=True,
             )
 
